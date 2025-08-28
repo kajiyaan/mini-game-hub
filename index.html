@@ -61,6 +61,7 @@
 // path はこの index.html からの相対パス。各ゲームは 1フォルダ1ファイル（index.html）。
 const games = [
   // --- サンプル（存在しなくてもOK。あとでファイルを置けば動きます） ---
+  { title: "オセロ（8x8・人間vs人間）", path: "games/othello-v1/index.html", tag:"ボード", desc:"合法手ハイライト／自動パス／勝敗表示" },
   { title: "将棋（人間 vs CPU 2手読み）", path: "games/shogi-v1/index.html", tag:"将棋", desc:"成り・王手・詰み対応。CPUは後手・2手読み（即着手）。" },
   { title: "ミニ将棋 5x5（入門）", path: "games/mini-shogi/index.html", tag:"将棋", desc:"5x5の簡易ルール。最初の1本に。" },
   // 例）{ title:"15パズル", path:"games/15puzzle/index.html", tag:"パズル", desc:"1〜15を並べ替えるクラシック。" },
