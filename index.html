@@ -1,5 +1,128 @@
-<!doctype html><meta charset="utf-8">
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mini Game Hub</title>
-<h1>Mini Game Hub</h1>
-<p>公開テスト用トップページです。のちほどカタログに差し替えます。</p>
-<p><a href="./">ホーム</a></p>
+<meta name="description" content="1ファイルHTMLのミニゲームを集めたカタログ。最大100個まで一覧表示。">
+<style>
+  :root{ --bg:#0f172a; --card:#111827; --text:#e5e7eb; --muted:#94a3b8; --accent:#22d3ee; --line:#1f2937; }
+  *{ box-sizing:border-box }
+  body{ margin:0; font-family:system-ui, -apple-system, "Segoe UI", Roboto, Arial; background:linear-gradient(160deg,#0b1220,#0f172a 40%,#0b1220); color:var(--text); }
+  a{ color:inherit }
+  .wrap{ max-width:1100px; margin:36px auto; padding:0 16px; }
+  header{ display:flex; flex-wrap:wrap; align-items:end; gap:10px; margin-bottom:8px; }
+  h1{ margin:0; font-size:28px; letter-spacing:.02em; }
+  .sub{ color:var(--muted); margin:0 0 16px; }
+  .bar{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:14px 0 20px; }
+  .search{ flex:1 1 260px; padding:11px 12px; border-radius:12px; border:1px solid #243042; background:#0b1220; color:var(--text); }
+  .btn{ padding:10px 12px; border-radius:12px; border:1px solid #243042; background:#0b1220; color:var(--text); cursor:pointer; }
+  .grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:14px; }
+  .card{ display:block; background:var(--card); padding:14px; border-radius:14px; border:1px solid var(--line); text-decoration:none; color:var(--text);
+         transition:transform .12s ease, border-color .12s ease, background .12s; }
+  .card:hover{ transform:translateY(-2px); border-color:var(--accent); }
+  .tag{ display:inline-block; font-size:12px; color:#0f172a; background:var(--accent); padding:2px 8px; border-radius:999px; margin-bottom:8px; }
+  .ttl{ font-weight:700; }
+  .desc{ color:var(--muted); font-size:13px; margin-top:4px; min-height:2.6em; }
+  .meta{ color:#9ca3af; font-size:11px; margin-top:6px; }
+  .footer{ color:var(--muted); font-size:12px; margin-top:18px; border-top:1px solid #1e293b; padding-top:12px; }
+  .hint{ font-size:12px; color:#cbd5e1; margin:8px 0 0 }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Mini Game Hub</h1>
+      <span style="background:#0b1220;border:1px solid #243042;color:#93c5fd;padding:2px 8px;border-radius:999px;font-size:12px">100本まで</span>
+    </header>
+    <p class="sub">単一ファイル（<code>index.html</code>）のミニゲームを、下にずらっと並べます。GitHub Pages対応。</p>
+
+    <div class="bar">
+      <input id="q" class="search" type="search" placeholder="ゲーム名やタグで絞り込み（例：将棋、パズル）">
+      <button id="randomBtn" class="btn" title="ランダムで1本遊ぶ">🎲 ランダム</button>
+      <button id="reloadBtn" class="btn" title="リスト再読み込み">↻ 再読み込み</button>
+    </div>
+
+    <div id="list" class="grid"></div>
+
+    <p class="hint">※ まだ無いパス（404）は後から追加すればOK。リンクは<strong>相対パス</strong>なので、GitHub Pagesのサブパスでも壊れません。</p>
+
+    <div class="footer">
+      追加方法：<br>
+      1) リポジトリ内にフォルダ作成（例 <code>games/shogi-v1/</code>）<br>
+      2) その中にゲームの <code>index.html</code> を置く（1ファイル）<br>
+      3) このページ内の <code>games</code> 配列に1行追記（タイトル・説明・パス・タグ）<br>
+      並び順は配列の順（上に新作を足すのがおすすめ）
+    </div>
+  </div>
+
+<script>
+// ====== ここに“リンク集”を追加していきます（最大100件） ======
+// path はこの index.html からの相対パス。各ゲームは 1フォルダ1ファイル（index.html）。
+const games = [
+  // --- サンプル（存在しなくてもOK。あとでファイルを置けば動きます） ---
+  { title: "将棋（人間 vs CPU 2手読み）", path: "games/shogi-v1/index.html", tag:"将棋", desc:"成り・王手・詰み対応。CPUは後手・2手読み（即着手）。" },
+  { title: "ミニ将棋 5x5（入門）", path: "games/mini-shogi/index.html", tag:"将棋", desc:"5x5の簡易ルール。最初の1本に。" },
+  // 例）{ title:"15パズル", path:"games/15puzzle/index.html", tag:"パズル", desc:"1〜15を並べ替えるクラシック。" },
+  // 例）{ title:"反射神経タップ", path:"games/reflex/index.html", tag:"アクション", desc:"光ったら即タップ！" },
+];
+
+// ====== ここから下は触らなくてもOK（表示ロジック） ======
+const list = document.getElementById('list');
+const q = document.getElementById('q');
+const randomBtn = document.getElementById('randomBtn');
+const reloadBtn = document.getElementById('reloadBtn');
+
+function card(g){
+  const a = document.createElement('a');
+  a.className = "card";
+  a.href = g.path; a.target = "_self"; // GitHub Pagesの相対リンク推奨
+  a.innerHTML = `
+    <span class="tag">${g.tag||"GAME"}</span>
+    <div class="ttl">${g.title}</div>
+    <div class="desc">${g.desc||""}</div>
+    <div class="meta">${g.path}</div>
+  `;
+  return a;
+}
+
+function render(filter=""){
+  list.innerHTML = "";
+  const f = filter.trim().toLowerCase();
+  const items = games
+    .filter(g => !f || g.title.toLowerCase().includes(f) || (g.tag||"").toLowerCase().includes(f))
+    .slice(0, 100); // 念のため上限100
+  items.forEach(g => list.appendChild(card(g)));
+  if(items.length===0){
+    const empty=document.createElement('div');
+    empty.style.color="#94a3b8";
+    empty.textContent="該当なし。検索ワードを変えてみてください。";
+    list.appendChild(empty);
+  }
+}
+
+q.addEventListener('input', e=>{
+  const v=e.target.value;
+  try{ localStorage.setItem("hub_search", v); }catch{}
+  render(v);
+});
+
+randomBtn.addEventListener('click', ()=>{
+  if(games.length===0) return;
+  const idx = Math.floor(Math.random()*games.length);
+  location.href = games[idx].path;
+});
+
+reloadBtn.addEventListener('click', ()=>render(q.value));
+
+(function init(){
+  // 前回の検索ワードを復元（任意）
+  try{
+    const prev = localStorage.getItem("hub_search");
+    if(prev){ q.value = prev; }
+  }catch{}
+  render(q.value);
+})();
+</script>
+</body>
+</html>
