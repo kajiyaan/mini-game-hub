@@ -1,1 +1,270 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>オセロ（8x8・人間vsCPU 1手読み）</title>
+<style>
+  :root{ --bg:#0f172a; --board:#065f46; --line:#064e3b; --hud:#111827; --text:#e5e7eb; --muted:#9ca3af; --acc:#22d3ee; }
+  *{ box-sizing:border-box }
+  body{ margin:0; background:linear-gradient(160deg,#0b1220,#0f172a 40%,#0b1220); color:var(--text); font-family:system-ui,Arial; }
+  .wrap{ max-width:1000px; margin:24px auto; padding:0 16px; display:grid; gap:16px; }
+  header{ display:flex; gap:8px; align-items:center; justify-content:space-between; }
+  .back{ color:#93c5fd; text-decoration:none; border:1px solid #243042; padding:6px 10px; border-radius:10px; background:#0b1220; }
+  .panel{ background:var(--hud); border:1px solid #1f2937; border-radius:12px; padding:12px; }
+  .hud{ display:grid; grid-template-columns: 1fr auto; gap:10px; align-items:center; }
+  .counts{ display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .stone{ width:16px; height:16px; border-radius:50%; display:inline-block; vertical-align:middle; margin-right:6px; }
+  .b{ background:#111 } .w{ background:#fff }
+  .btn{ padding:8px 10px; border:1px solid #334155; border-radius:10px; background:#0b1220; color:var(--text); cursor:pointer; }
+  .btn:disabled{ opacity:.5; cursor:not-allowed }
+  .board{ aspect-ratio:1/1; background:var(--board); border:6px solid #064e3b; border-radius:14px;
+          display:grid; grid-template-columns:repeat(8,1fr); grid-template-rows:repeat(8,1fr); box-shadow:0 10px 24px rgba(0,0,0,.25);}
+  .cell{ position:relative; border:1px solid var(--line); display:grid; place-items:center; cursor:pointer; }
+  .disc{ width:70%; height:70%; border-radius:50%; box-shadow:inset 0 2px 4px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.25); }
+  .disc.black{ background:#111; }
+  .disc.white{ background:#fff; }
+  .hint{ width:22%; height:22%; border-radius:50%; background:radial-gradient(circle at 35% 35%, #a7f3d0, #059669); opacity:.85; }
+  .last{ outline:3px solid var(--acc); outline-offset:-3px; border-radius:4px; }
+  .msg{ min-height:1.2em; color:#fca5a5; font-size:13px; }
+  .note{ color:var(--muted); font-size:12px; }
+  .badge{ font-size:12px; color:#cbd5e1; background:#0b1220; border:1px solid #243042; padding:2px 8px; border-radius:999px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <a class="back" href="../../">← ハブに戻る</a>
+    <h1 style="margin:0;font-size:20px">オセロ（8×8・人間vsCPU：1手読み）</h1>
+    <span class="badge">CPU＝白（後手）</span>
+  </header>
+
+  <div class="panel hud">
+    <div class="counts">
+      <span><span class="stone b"></span>黒：<b id="countB">2</b></span>
+      <span><span class="stone w"></span>白：<b id="countW">2</b></span>
+      <span style="margin-left:10px">手番：<b id="turnLabel">黒（あなた）</b></span>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <button id="hintBtn" class="btn">ヒント：ON</button>
+      <button id="undoBtn" class="btn">1手戻す</button>
+      <button id="resetBtn" class="btn">初期化</button>
+    </div>
+  </div>
+
+  <div id="msg" class="msg"></div>
+
+  <div id="board" class="board" aria-label="Othello board"></div>
+
+  <div class="panel note">
+    ルール：はさんだ相手石を裏返し。打てる手がないときは自動パス。両者打てなければ終了し、枚数の多い方が勝ち。<br>
+    CPUは白（後手）。<b>置ける場所に丸い点</b>が出ます（人間手番のみ）。
+  </div>
+</div>
+
+<script>
+/* ===== 基本データ =====
+   盤：0=空, 1=黒(あなた), -1=白(CPU)
+   黒が先手（置くたびに-1倍で手番交代）
+*/
+const SIZE = 8;
+const boardEl = document.getElementById('board');
+const countB = document.getElementById('countB');
+const countW = document.getElementById('countW');
+const turnLabel = document.getElementById('turnLabel');
+const msg = document.getElementById('msg');
+const hintBtn = document.getElementById('hintBtn');
+const resetBtn = document.getElementById('resetBtn');
+const undoBtn = document.getElementById('undoBtn');
+
+const CPU = -1; // 白がCPU
+let board, turn, showHints=true, lastMove=null, gameOver=false;
+let history=[]; // 盤・手番・lastMove・gameOver
+let cpuThinking=false;
+
+function makeEmpty(){ return Array.from({length:SIZE},()=>Array(SIZE).fill(0)); }
+function clone(b){ return b.map(row=>row.slice()); }
+
+function init(){
+  board = makeEmpty();
+  const m=SIZE/2;
+  board[m-1][m-1] = -1; // 白
+  board[m][m]     = -1;
+  board[m-1][m]   =  1; // 黒
+  board[m][m-1]   =  1;
+  turn = 1; // 黒から
+  lastMove=null; gameOver=false; history=[];
+  pushHistory();
+  render();
+}
+
+const DIRS = [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]];
+function inside(r,c){ return r>=0 && r<SIZE && c>=0 && c<SIZE; }
+
+// 置いたときに裏返る座標リスト
+function flipsIfPlace(b, r,c,who){
+  if(b[r][c] !== 0) return [];
+  const opp = -who;
+  const flips=[];
+  for(const [dr,dc] of DIRS){
+    let rr=r+dr, cc=c+dc;
+    const line=[];
+    while(inside(rr,cc) && b[rr][cc]===opp){ line.push([rr,cc]); rr+=dr; cc+=dc; }
+    if(line.length>0 && inside(rr,cc) && b[rr][cc]===who){ flips.push(...line); }
+  }
+  return flips;
+}
+
+// 合法手
+function legalMoves(b, who){
+  const ms=[];
+  for(let r=0;r<SIZE;r++)for(let c=0;c<SIZE;c++){
+    const f=flipsIfPlace(b, r,c,who);
+    if(f.length) ms.push({r,c,flips:f});
+  }
+  return ms;
+}
+
+function counts(b){
+  let black=0, white=0;
+  for(let r=0;r<SIZE;r++)for(let c=0;c<SIZE;c++){
+    if(b[r][c]===1) black++; else if(b[r][c]===-1) white++;
+  }
+  return {black,white};
+}
+
+function pushHistory(){
+  history.push(JSON.stringify({board,turn,lastMove,gameOver}));
+  if(history.length>300) history.shift();
+}
+function popHistory(){
+  if(history.length<=1) return false;
+  history.pop();
+  const s=JSON.parse(history[history.length-1]);
+  board = s.board.map(row=>row.slice());
+  turn = s.turn; lastMove = s.lastMove; gameOver = s.gameOver;
+  render();
+  // Undo後にCPU手番なら自動で指す
+  if(!gameOver && turn===CPU && !cpuThinking){
+    cpuThinking=true; setTimeout(()=>{ cpuMove(); cpuThinking=false; }, 120);
+  }
+  return true;
+}
+
+// 人間が置く
+function placeHuman(r,c){
+  if(gameOver) return;
+  if(turn!==1){ msg.textContent="今はCPU（白）の手番です。"; return; }
+  const mv = legalMoves(board, turn).find(m=>m.r===r && m.c===c);
+  if(!mv) return;
+
+  pushHistory();
+  board[r][c] = turn;
+  for(const [rr,cc] of mv.flips){ board[rr][cc] = turn; }
+  lastMove = {r,c};
+  turn = -turn;
+
+  proceedTurn();
+}
+
+// 手番進行（パス/終局/CPU）
+function proceedTurn(){
+  if(gameOver) return;
+
+  if(legalMoves(board, turn).length===0){
+    if(legalMoves(board, -turn).length===0){
+      gameOver=true; showResult(); render(); return;
+    }else{
+      msg.textContent = (turn===1 ? "黒" : "白") + "は打てる手がありません（パス）。";
+      turn = -turn;
+    }
+  }else{
+    msg.textContent = "";
+  }
+
+  render();
+
+  if(!gameOver && turn===CPU && !cpuThinking){
+    cpuThinking = true;
+    setTimeout(()=>{ cpuMove(); cpuThinking=false; }, 120);
+  }
+}
+
+// CPU：1手読み（返せる枚数最大）同点はランダム
+function cpuMove(){
+  if(gameOver || turn!==CPU) return;
+  const ms = legalMoves(board, CPU);
+  if(ms.length===0){ proceedTurn(); return; }
+
+  let best = [], max = -1;
+  for(const m of ms){
+    const n = m.flips.length;
+    if(n>max){ max=n; best=[m]; } else if(n===max){ best.push(m); }
+  }
+  const mv = best[Math.floor(Math.random()*best.length)];
+
+  pushHistory();
+  board[mv.r][mv.c] = CPU;
+  for(const [rr,cc] of mv.flips){ board[rr][cc] = CPU; }
+  lastMove = {r: mv.r, c: mv.c};
+  turn = -turn;
+
+  proceedTurn();
+}
+
+function showResult(){
+  const {black:b, white:w} = counts(board);
+  if(b>w) msg.textContent = `終了：黒 ${b} – 白 ${w}　黒（あなた）の勝ち！`;
+  else if(w>b) msg.textContent = `終了：黒 ${b} – 白 ${w}　白（CPU）の勝ち！`;
+  else msg.textContent = `終了：黒 ${b} – 白 ${w}　引き分け！`;
+}
+
+function render(){
+  boardEl.innerHTML="";
+  const ls = legalMoves(board, turn);
+  const legalMap = new Set(ls.map(m=>m.r+","+m.c));
+  for(let r=0;r<SIZE;r++)for(let c=0;c<SIZE;c++){
+    const cell=document.createElement('div');
+    cell.className="cell";
+    if(lastMove && lastMove.r===r && lastMove.c===c) cell.classList.add('last');
+
+    const v=board[r][c];
+    if(v!==0){
+      const d=document.createElement('div');
+      d.className="disc " + (v===1 ? "black" : "white");
+      cell.appendChild(d);
+    }else if(showHints && legalMap.has(r+","+c) && !gameOver && turn===1){
+      const h=document.createElement('div'); h.className="hint"; cell.appendChild(h);
+    }
+
+    cell.addEventListener('click', ()=>placeHuman(r,c));
+    boardEl.appendChild(cell);
+  }
+  const {black,white}=counts(board);
+  countB.textContent=black; countW.textContent=white;
+  turnLabel.textContent = gameOver ? "—" : (turn===1?"黒（あなた）":"白（CPU）");
+
+  // 念のため：双方打てないなら明示して終了
+  if(!gameOver && legalMoves(board, 1).length===0 && legalMoves(board, -1).length===0){
+    gameOver=true; showResult();
+  }
+}
+
+// ボタン
+hintBtn.addEventListener('click', ()=>{
+  showHints = !showHints;
+  hintBtn.textContent = "ヒント：" + (showHints?"ON":"OFF");
+  render();
+});
+resetBtn.addEventListener('click', ()=>{ init(); msg.textContent=""; });
+undoBtn.addEventListener('click', ()=>{
+  if(!popHistory()) { msg.textContent="これ以上戻せません。"; }
+});
+
+// 初期化
+for(let i=0;i<SIZE*SIZE;i++){ const d=document.createElement('div'); d.className='cell'; boardEl.appendChild(d); }
+init();
+</script>
+</body>
+</html>
 
